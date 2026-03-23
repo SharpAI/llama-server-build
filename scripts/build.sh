@@ -52,6 +52,7 @@ if [ -n "${CROSS_ARCH:-}" ]; then
         *)      PLATFORM_ARCH="$CROSS_ARCH" ;;
     esac
     CROSS_COMPILE_ARGS+=( -DGGML_NATIVE=OFF )
+    CROSS_COMPILE_ARGS+=( -DLLAMA_BUILD_BORINGSSL=OFF )
     if [ "$PLATFORM_OS" = "macos" ]; then
         CROSS_COMPILE_ARGS+=( -DCMAKE_OSX_ARCHITECTURES="$CROSS_ARCH" )
     fi
