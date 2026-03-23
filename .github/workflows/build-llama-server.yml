@@ -196,7 +196,6 @@ jobs:
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
 
     steps:
       - name: Checkout build repo
