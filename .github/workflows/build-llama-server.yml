@@ -250,11 +250,13 @@ jobs:
 
       - name: Install Vulkan SDK (Windows)
         if: matrix.os == 'windows' && matrix.acceleration == 'vulkan'
+        env:
+          VULKAN_VERSION: 1.4.313.0
         run: |
-          curl -L -o vulkan-sdk.exe https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe
-          .\vulkan-sdk.exe --accept-licenses --default-answer --root C:\VulkanSDK install
-          echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
-          echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
+          curl -L -o vulkan-sdk.exe "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
+          .\vulkan-sdk.exe --accept-licenses --default-answer --confirm-command install
+          echo "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\${env:VULKAN_VERSION}\bin" >> $env:GITHUB_PATH
 
       # ── Build (Linux & macOS) ──
       - name: Build llama-server (Unix)
