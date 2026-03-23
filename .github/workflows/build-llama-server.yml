@@ -85,39 +85,137 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ── Linux x64 ──
           - name: linux-x64-cpu
             runner: ubuntu-22.04
+            os: linux
             acceleration: cpu
+            cuda_version: ''
             cuda_architectures: ''
 
           - name: linux-x64-cuda-12
             runner: ubuntu-22.04
+            os: linux
             acceleration: cuda
+            cuda_version: '12-8'
+            cuda_pkg: 'cuda-toolkit-12-8'
+            cuda_home: '/usr/local/cuda-12.8'
 
+          - name: linux-x64-cuda-13
+            runner: ubuntu-22.04
+            os: linux
+            acceleration: cuda
+            cuda_version: '13-1'
+            cuda_pkg: 'cuda-toolkit-13-1'
+            cuda_home: '/usr/local/cuda-13.1'
+
+          - name: linux-x64-vulkan
+            runner: ubuntu-22.04
+            os: linux
+            acceleration: vulkan
+            cuda_version: ''
+            cuda_architectures: ''
+
+          # ── Linux arm64 ──
           - name: linux-arm64-cpu
             runner: ubuntu-22.04-arm
+            os: linux
             acceleration: cpu
+            cuda_version: ''
             cuda_architectures: ''
 
           - name: linux-arm64-cuda-12
             runner: ubuntu-22.04-arm
+            os: linux
             acceleration: cuda
+            cuda_version: '12-8'
+            cuda_pkg: 'cuda-toolkit-12-8'
+            cuda_home: '/usr/local/cuda-12.8'
+
+          - name: linux-arm64-cuda-13
+            runner: ubuntu-22.04-arm
+            os: linux
+            acceleration: cuda
+            cuda_version: '13-1'
+            cuda_pkg: 'cuda-toolkit-13-1'
+            cuda_home: '/usr/local/cuda-13.1'
+
+          # ── Windows x64 ──
+          - name: windows-x64-cpu
+            runner: windows-2022
+            os: windows
+            acceleration: cpu
+            cuda_version: ''
+            cuda_architectures: ''
+
+          - name: windows-x64-cuda-12
+            runner: windows-2022
+            os: windows
+            acceleration: cuda
+            cuda_version: '12.4.1'
+
+          - name: windows-x64-cuda-13
+            runner: windows-2022
+            os: windows
+            acceleration: cuda
+            cuda_version: '13.1.0'
+
+          - name: windows-x64-vulkan
+            runner: windows-2022
+            os: windows
+            acceleration: vulkan
+            cuda_version: ''
+            cuda_architectures: ''
+
+          # ── Windows arm64 (cross-compile) ──
+          - name: windows-arm64-cpu
+            runner: windows-2022
+            os: windows
+            acceleration: cpu
+            cross_arch: arm64
+            cuda_version: ''
+            cuda_architectures: ''
+
+          # ── macOS ──
+          - name: macos-arm64-metal
+            runner: macos-14
+            os: macos
+            acceleration: metal
+            cuda_version: ''
+            cuda_architectures: ''
+
+          - name: macos-x64-cpu
+            runner: macos-13
+            os: macos
+            acceleration: cpu
+            cuda_version: ''
+            cuda_architectures: ''
 
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout build repo
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      # ── Linux dependencies ──
+      - name: Install build dependencies (Linux)
+        if: matrix.os == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake git
 
-      - name: Install CUDA toolkit
-        if: matrix.acceleration == 'cuda'
+      - name: Install Vulkan SDK (Linux)
+        if: matrix.os == 'linux' && matrix.acceleration == 'vulkan'
+        run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
+      - name: Install CUDA toolkit (Linux)
+        if: matrix.os == 'linux' && matrix.acceleration == 'cuda'
         run: |
           ARCH=$(dpkg --print-architecture)
           if [ "$ARCH" = "amd64" ]; then
@@ -132,18 +230,30 @@ jobs:
           wget -qO- "${CUDA_REPO}/3bf863cc.pub" | sudo gpg --dearmor -o /usr/share/keyrings/cuda-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] ${CUDA_REPO} /" | sudo tee /etc/apt/sources.list.d/cuda.list
           sudo apt-get update
-          sudo apt-get install -y cuda-toolkit-12-8
+          sudo apt-get install -y ${{ matrix.cuda_pkg }}
 
-          echo "CUDA_HOME=/usr/local/cuda-12.8" >> $GITHUB_ENV
-          echo "/usr/local/cuda-12.8/bin" >> $GITHUB_PATH
+          echo "CUDA_HOME=${{ matrix.cuda_home }}" >> $GITHUB_ENV
+          echo "${{ matrix.cuda_home }}/bin" >> $GITHUB_PATH
 
-      - name: Verify CUDA installation
-        if: matrix.acceleration == 'cuda'
+      # ── Windows dependencies ──
+      - name: Install CUDA toolkit (Windows)
+        if: matrix.os == 'windows' && matrix.acceleration == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: 'network'
+
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.os == 'windows' && matrix.acceleration == 'vulkan'
         run: |
-          nvcc --version
-          echo "CUDA_HOME=$CUDA_HOME"
+          curl -L -o vulkan-sdk.exe https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe
+          .\vulkan-sdk.exe --accept-licenses --default-answer --root C:\VulkanSDK install
+          echo "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
 
-      - name: Build llama-server
+      # ── Build (Linux & macOS) ──
+      - name: Build llama-server (Unix)
+        if: matrix.os != 'windows'
         run: |
           chmod +x scripts/build.sh
           bash scripts/build.sh \
@@ -151,11 +261,64 @@ jobs:
             "${{ matrix.acceleration }}" \
             "${{ matrix.cuda_architectures || needs.detect-version.outputs.cuda_architectures }}"
 
+      # ── Build (Windows) ──
+      - name: Build llama-server (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $version = "${{ needs.detect-version.outputs.version }}"
+          $acceleration = "${{ matrix.acceleration }}"
+          $cudaArchs = "${{ matrix.cuda_architectures || needs.detect-version.outputs.cuda_architectures }}"
+          $crossArch = "${{ matrix.cross_arch }}"
+
+          # Clone source
+          git clone --depth 1 --branch $version https://github.com/ggml-org/llama.cpp.git C:\llama-source
+
+          # Configure cmake
+          $cmakeArgs = @(
+            "-B", "C:\llama-build",
+            "-S", "C:\llama-source",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DLLAMA_BUILD_TESTS=OFF",
+            "-DLLAMA_BUILD_EXAMPLES=OFF",
+            "-DLLAMA_BUILD_SERVER=ON"
+          )
+
+          if ($acceleration -eq "cuda") {
+            $cmakeArgs += "-DGGML_CUDA=ON"
+            if ($cudaArchs) { $cmakeArgs += "-DCMAKE_CUDA_ARCHITECTURES=$cudaArchs" }
+          } elseif ($acceleration -eq "vulkan") {
+            $cmakeArgs += "-DGGML_VULKAN=ON"
+          }
+
+          if ($crossArch -eq "arm64") {
+            $cmakeArgs += "-A", "ARM64"
+          }
+
+          cmake @cmakeArgs
+          cmake --build C:\llama-build --config Release --target llama-server -j $env:NUMBER_OF_PROCESSORS
+
+          # Package
+          $artifactName = "llama-server-${version}-${{ matrix.name }}"
+          $stagingDir = "C:\llama-staging\$artifactName"
+          New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+
+          # Copy binary and DLLs
+          Copy-Item "C:\llama-build\bin\Release\llama-server.exe" "$stagingDir\" -ErrorAction SilentlyContinue
+          Copy-Item "C:\llama-build\bin\llama-server.exe" "$stagingDir\" -ErrorAction SilentlyContinue
+          Get-ChildItem "C:\llama-build" -Recurse -Include "*.dll" | Copy-Item -Destination "$stagingDir\" -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path "$stagingDir" -DestinationPath "dist\${artifactName}.zip"
+          Write-Host "✅ Built: dist\${artifactName}.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
           retention-days: 7
 
   # ── Step 3: Publish release ──────────────────────────────────────────────────
@@ -169,7 +332,7 @@ jobs:
           path: artifacts/
 
       - name: List artifacts
-        run: find artifacts/ -type f -name '*.tar.gz' | sort
+        run: find artifacts/ -type f \( -name '*.tar.gz' -o -name '*.zip' \) | sort
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -179,18 +342,36 @@ jobs:
           body: |
             Pre-built `llama-server` binaries from [llama.cpp ${{ needs.detect-version.outputs.version }}](https://github.com/ggml-org/llama.cpp/releases/tag/${{ needs.detect-version.outputs.version }}).
 
-            ## Downloads
+            ## Downloads — Linux
 
             | Variant | File |
             |---------|------|
-            | Linux x64 CPU | `llama-server-${{ needs.detect-version.outputs.version }}-linux-x64-cpu.tar.gz` |
-            | Linux x64 CUDA 12.8 | `llama-server-${{ needs.detect-version.outputs.version }}-linux-x64-cuda-12.tar.gz` |
-            | Linux arm64 CPU | `llama-server-${{ needs.detect-version.outputs.version }}-linux-arm64-cpu.tar.gz` |
-            | Linux arm64 CUDA 12.8 | `llama-server-${{ needs.detect-version.outputs.version }}-linux-arm64-cuda-12.tar.gz` |
+            | x64 CPU | `llama-server-*-linux-x64-cpu.tar.gz` |
+            | x64 CUDA 12.8 | `llama-server-*-linux-x64-cuda-12.tar.gz` |
+            | x64 CUDA 13.1 | `llama-server-*-linux-x64-cuda-13.tar.gz` |
+            | x64 Vulkan | `llama-server-*-linux-x64-vulkan.tar.gz` |
+            | arm64 CPU | `llama-server-*-linux-arm64-cpu.tar.gz` |
+            | arm64 CUDA 12.8 | `llama-server-*-linux-arm64-cuda-12.tar.gz` |
+            | arm64 CUDA 13.1 | `llama-server-*-linux-arm64-cuda-13.tar.gz` |
+
+            ## Downloads — Windows
+
+            | Variant | File |
+            |---------|------|
+            | x64 CPU | `llama-server-*-windows-x64-cpu.zip` |
+            | x64 CUDA 12.4 | `llama-server-*-windows-x64-cuda-12.zip` |
+            | x64 CUDA 13.1 | `llama-server-*-windows-x64-cuda-13.zip` |
+            | x64 Vulkan | `llama-server-*-windows-x64-vulkan.zip` |
+            | arm64 CPU | `llama-server-*-windows-arm64-cpu.zip` |
+
+            ## Downloads — macOS
+
+            | Variant | File |
+            |---------|------|
+            | arm64 Metal | `llama-server-*-macos-arm64-metal.tar.gz` |
+            | x64 CPU | `llama-server-*-macos-x64-cpu.tar.gz` |
 
             ### CUDA SM targets: `${{ needs.detect-version.outputs.cuda_architectures }}`
-
-            Built with CUDA toolkit 12.8. Requires NVIDIA driver ≥ 570.x on the host.
-          files: artifacts/**/*.tar.gz
+          files: artifacts/**/*
           fail_on_unmatched_files: false
           generate_release_notes: false

@@ -1,5 +1,5 @@
 #!/bin/bash
-# build.sh — Build llama-server from source
+# build.sh — Build llama-server from source (Linux & macOS)
 #
 # Usage:
 #   ./scripts/build.sh <version> <acceleration> [cuda_architectures]
@@ -7,6 +7,8 @@
 # Examples:
 #   ./scripts/build.sh b8416 cpu
 #   ./scripts/build.sh b8416 cuda "75;80;86;89;90;100;120"
+#   ./scripts/build.sh b8416 vulkan
+#   ./scripts/build.sh b8416 metal
 #
 # Environment:
 #   CUDA_HOME — path to CUDA toolkit (auto-detected if not set)
@@ -26,22 +28,40 @@ SOURCE_DIR="/tmp/llama-source"
 # ── Derived values ────────────────────────────────────────────────────────────
 
 ARCH="$(uname -m)"
+OS="$(uname -s)"
+
 case "$ARCH" in
     x86_64)  PLATFORM_ARCH="x64" ;;
     aarch64) PLATFORM_ARCH="arm64" ;;
+    arm64)   PLATFORM_ARCH="arm64" ;;
     *)       echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
+case "$OS" in
+    Linux)  PLATFORM_OS="linux" ;;
+    Darwin) PLATFORM_OS="macos" ;;
+    *)      echo "❌ Unsupported OS: $OS"; exit 1 ;;
+esac
+
 if [ "$ACCELERATION" = "cuda" ]; then
-    ARTIFACT_NAME="llama-server-${VERSION}-linux-${PLATFORM_ARCH}-cuda-12"
+    # Determine CUDA label from CUDA_HOME path
+    CUDA_LABEL="cuda-12"
+    if [ -n "${CUDA_HOME:-}" ]; then
+        case "$CUDA_HOME" in
+            *13*) CUDA_LABEL="cuda-13" ;;
+            *12*) CUDA_LABEL="cuda-12" ;;
+        esac
+    fi
+    ARTIFACT_NAME="llama-server-${VERSION}-${PLATFORM_OS}-${PLATFORM_ARCH}-${CUDA_LABEL}"
 else
-    ARTIFACT_NAME="llama-server-${VERSION}-linux-${PLATFORM_ARCH}-cpu"
+    ARTIFACT_NAME="llama-server-${VERSION}-${PLATFORM_OS}-${PLATFORM_ARCH}-${ACCELERATION}"
 fi
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  llama-server builder                                       ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Version:       ${VERSION}"
+echo "║  OS:            ${PLATFORM_OS}"
 echo "║  Acceleration:  ${ACCELERATION}"
 echo "║  Architecture:  ${ARCH} (${PLATFORM_ARCH})"
 echo "║  CUDA archs:    ${CUDA_ARCHS:-n/a}"
@@ -66,46 +86,57 @@ CMAKE_ARGS=(
     -DLLAMA_BUILD_SERVER=ON
 )
 
-if [ "$ACCELERATION" = "cuda" ]; then
-    if [ -z "$CUDA_ARCHS" ]; then
-        echo "❌ CUDA build requires cuda_architectures argument"
+case "$ACCELERATION" in
+    cuda)
+        if [ -z "$CUDA_ARCHS" ]; then
+            echo "❌ CUDA build requires cuda_architectures argument"
+            exit 1
+        fi
+
+        # Auto-detect CUDA_HOME if not set
+        if [ -z "${CUDA_HOME:-}" ]; then
+            for candidate in /usr/local/cuda /usr/local/cuda-13 /usr/local/cuda-13.1 /usr/local/cuda-12 /usr/local/cuda-12.8; do
+                if [ -d "$candidate" ]; then
+                    export CUDA_HOME="$candidate"
+                    break
+                fi
+            done
+        fi
+
+        if [ -z "${CUDA_HOME:-}" ]; then
+            echo "❌ CUDA_HOME not set and no CUDA toolkit found"
+            exit 1
+        fi
+
+        echo "🔧 Using CUDA toolkit: $CUDA_HOME"
+        export PATH="${CUDA_HOME}/bin:${PATH}"
+
+        CMAKE_ARGS+=(
+            -DGGML_CUDA=ON
+            -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}"
+        )
+        ;;
+    vulkan)
+        CMAKE_ARGS+=( -DGGML_VULKAN=ON )
+        ;;
+    metal)
+        CMAKE_ARGS+=( -DGGML_METAL=ON )
+        ;;
+    cpu)
+        CMAKE_ARGS+=( -DGGML_CUDA=OFF )
+        ;;
+    *)
+        echo "❌ Unknown acceleration: $ACCELERATION"
         exit 1
-    fi
-
-    # Auto-detect CUDA_HOME if not set
-    if [ -z "${CUDA_HOME:-}" ]; then
-        for candidate in /usr/local/cuda /usr/local/cuda-12 /usr/local/cuda-12.8; do
-            if [ -d "$candidate" ]; then
-                export CUDA_HOME="$candidate"
-                break
-            fi
-        done
-    fi
-
-    if [ -z "${CUDA_HOME:-}" ]; then
-        echo "❌ CUDA_HOME not set and no CUDA toolkit found in /usr/local/cuda*"
-        exit 1
-    fi
-
-    echo "🔧 Using CUDA toolkit: $CUDA_HOME"
-    export PATH="${CUDA_HOME}/bin:${PATH}"
-
-    CMAKE_ARGS+=(
-        -DGGML_CUDA=ON
-        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}"
-    )
-else
-    CMAKE_ARGS+=(
-        -DGGML_CUDA=OFF
-    )
-fi
+        ;;
+esac
 
 echo "🔧 Configuring cmake..."
 cmake "${CMAKE_ARGS[@]}"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-NPROC="$(nproc)"
+NPROC="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 echo "🔨 Building with ${NPROC} jobs..."
 cmake --build "$BUILD_DIR" --config Release -j"${NPROC}" --target llama-server
 
@@ -117,11 +148,19 @@ rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
 # Copy the binary
-cp "${BUILD_DIR}/bin/llama-server" "$STAGING_DIR/"
+if [ -f "${BUILD_DIR}/bin/llama-server" ]; then
+    cp "${BUILD_DIR}/bin/llama-server" "$STAGING_DIR/"
+elif [ -f "${BUILD_DIR}/bin/Release/llama-server" ]; then
+    cp "${BUILD_DIR}/bin/Release/llama-server" "$STAGING_DIR/"
+else
+    echo "❌ Cannot find llama-server binary in build output"
+    find "${BUILD_DIR}/bin" -type f 2>/dev/null || true
+    exit 1
+fi
 chmod +x "$STAGING_DIR/llama-server"
 
 # Copy shared libraries if present
-find "${BUILD_DIR}" -name '*.so' -o -name '*.so.*' | while read -r lib; do
+find "${BUILD_DIR}" \( -name '*.so' -o -name '*.so.*' -o -name '*.dylib' -o -name '*.metal' \) | while read -r lib; do
     cp "$lib" "$STAGING_DIR/" 2>/dev/null || true
 done
 

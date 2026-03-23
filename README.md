@@ -1,37 +1,48 @@
 # llama-server-build
 
-Automated builds of [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` for [Aegis-AI](https://github.com/solderzzc/Aegis-AI).
+Automated builds of [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` for [Aegis-AI](https://github.com/SharpAI/Aegis-AI).
 
-Produces pre-built binaries for Linux (CPU and CUDA 12.8) on both x64 and arm64, published as GitHub Releases tagged to match the upstream llama.cpp version (e.g. `b8416`).
+Produces pre-built binaries for **all platforms**, published as GitHub Releases tagged to match the upstream llama.cpp version (e.g. `b8416`). New releases are auto-detected every 6 hours.
 
-## Build Matrix
+## Build Matrix (14 variants)
 
-| Artifact | Runner | GPU | SM Targets |
-|----------|--------|-----|------------|
-| `llama-server-{ver}-linux-x64-cpu.tar.gz` | ubuntu-22.04 | — | — |
-| `llama-server-{ver}-linux-x64-cuda-12.tar.gz` | ubuntu-22.04 | CUDA 12.8 | 75–120 |
-| `llama-server-{ver}-linux-arm64-cpu.tar.gz` | ubuntu-22.04-arm | — | — |
-| `llama-server-{ver}-linux-arm64-cuda-12.tar.gz` | ubuntu-22.04-arm | CUDA 12.8 | 75–120 |
+### Linux
 
-### SM Architecture Coverage
+| Artifact | GPU | SM Targets |
+|----------|-----|------------|
+| `llama-server-{ver}-linux-x64-cpu.tar.gz` | — | — |
+| `llama-server-{ver}-linux-x64-cuda-12.tar.gz` | CUDA 12.8 | 75–120 |
+| `llama-server-{ver}-linux-x64-cuda-13.tar.gz` | CUDA 13.1 | 75–120 |
+| `llama-server-{ver}-linux-x64-vulkan.tar.gz` | Vulkan | — |
+| `llama-server-{ver}-linux-arm64-cpu.tar.gz` | — | — |
+| `llama-server-{ver}-linux-arm64-cuda-12.tar.gz` | CUDA 12.8 | 75–120 |
+| `llama-server-{ver}-linux-arm64-cuda-13.tar.gz` | CUDA 13.1 | 75–120 |
 
-| SM | Hardware |
-|----|----------|
-| 75 | RTX 20xx, Tesla T4 (Turing) |
-| 80 | A100 (Ampere) |
-| 86 | RTX 30xx (Ampere) |
-| 89 | RTX 40xx, L4, L40 (Ada) |
-| 90 | H100, H200 (Hopper) |
-| 100 | B200 (Blackwell server) |
-| 120 | RTX 50xx, DGX Spark (Blackwell) |
+### Windows
 
-## Usage
+| Artifact | GPU |
+|----------|-----|
+| `llama-server-{ver}-windows-x64-cpu.zip` | — |
+| `llama-server-{ver}-windows-x64-cuda-12.zip` | CUDA 12.4 |
+| `llama-server-{ver}-windows-x64-cuda-13.zip` | CUDA 13.1 |
+| `llama-server-{ver}-windows-x64-vulkan.zip` | Vulkan |
+| `llama-server-{ver}-windows-arm64-cpu.zip` | — |
 
-### Trigger a build
+### macOS
 
-Go to **Actions → Build llama-server → Run workflow** and enter the upstream version tag (e.g. `b8416`).
+| Artifact | GPU |
+|----------|-----|
+| `llama-server-{ver}-macos-arm64-metal.tar.gz` | Metal |
+| `llama-server-{ver}-macos-x64-cpu.tar.gz` | — |
 
-### Download a release
+## How it works
+
+1. **Every 6 hours**, the workflow checks the latest [llama.cpp release](https://github.com/ggml-org/llama.cpp/releases)
+2. If our repo doesn't have a matching release, it **automatically builds all 14 variants**
+3. Binaries are published as a GitHub Release with the same version tag
+4. You can also **manually trigger** a build from the Actions tab
+
+## Download
 
 ```bash
 VERSION=b8416
@@ -43,7 +54,7 @@ tar -xzf llama-server-cuda.tar.gz
 
 ## How Aegis-AI uses these builds
 
-Aegis-AI's `config/llama-binary-manifest.json` contains `url_template` entries pointing to this repo's releases. The runtime binary manager (`llama-binary-manager.cjs`) downloads the appropriate variant when a user installs or upgrades the AI engine.
+Aegis-AI's `config/llama-binary-manifest.json` contains `url_template` entries pointing to this repo's releases. The runtime binary manager downloads the appropriate variant when a user installs or upgrades the AI engine.
 
 ## License
 
