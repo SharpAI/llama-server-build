@@ -1,0 +1,142 @@
+name: Build llama-server
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'llama.cpp version tag (e.g. b8416)'
+        required: true
+        type: string
+      cuda_architectures:
+        description: 'CUDA SM targets (semicolon-separated)'
+        required: false
+        default: '75;80;86;89;90;100;120'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux x64 CPU ──
+          - name: linux-x64-cpu
+            runner: ubuntu-22.04
+            acceleration: cpu
+            cuda_architectures: ''
+
+          # ── Linux x64 CUDA 12 ──
+          - name: linux-x64-cuda-12
+            runner: ubuntu-22.04
+            acceleration: cuda
+            cuda_architectures: ${{ inputs.cuda_architectures }}
+
+          # ── Linux arm64 CPU ──
+          - name: linux-arm64-cpu
+            runner: ubuntu-22.04-arm
+            acceleration: cpu
+            cuda_architectures: ''
+
+          # ── Linux arm64 CUDA 12 ──
+          - name: linux-arm64-cuda-12
+            runner: ubuntu-22.04-arm
+            acceleration: cuda
+            cuda_architectures: ${{ inputs.cuda_architectures }}
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+
+      - name: Install CUDA toolkit
+        if: matrix.acceleration == 'cuda'
+        run: |
+          # Install CUDA 12.8 from NVIDIA's apt repository
+          ARCH=$(dpkg --print-architecture)
+          if [ "$ARCH" = "amd64" ]; then
+            CUDA_REPO="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64"
+          elif [ "$ARCH" = "arm64" ]; then
+            CUDA_REPO="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/sbsa"
+          else
+            echo "❌ Unsupported architecture: $ARCH"
+            exit 1
+          fi
+
+          # Add NVIDIA repository
+          wget -qO- "${CUDA_REPO}/3bf863cc.pub" | sudo gpg --dearmor -o /usr/share/keyrings/cuda-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] ${CUDA_REPO} /" | sudo tee /etc/apt/sources.list.d/cuda.list
+          sudo apt-get update
+
+          # Install minimal CUDA toolkit (compiler + libraries, no driver)
+          sudo apt-get install -y cuda-toolkit-12-8
+
+          echo "CUDA_HOME=/usr/local/cuda-12.8" >> $GITHUB_ENV
+          echo "/usr/local/cuda-12.8/bin" >> $GITHUB_PATH
+
+      - name: Verify CUDA installation
+        if: matrix.acceleration == 'cuda'
+        run: |
+          nvcc --version
+          echo "CUDA_HOME=$CUDA_HOME"
+
+      - name: Build llama-server
+        run: |
+          chmod +x scripts/build.sh
+          bash scripts/build.sh \
+            "${{ inputs.version }}" \
+            "${{ matrix.acceleration }}" \
+            "${{ matrix.cuda_architectures }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List artifacts
+        run: find artifacts/ -type f -name '*.tar.gz' | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: "llama-server ${{ inputs.version }}"
+          body: |
+            Pre-built `llama-server` binaries from [llama.cpp ${{ inputs.version }}](https://github.com/ggml-org/llama.cpp/releases/tag/${{ inputs.version }}).
+
+            ## Downloads
+
+            | Variant | File |
+            |---------|------|
+            | Linux x64 CPU | `llama-server-${{ inputs.version }}-linux-x64-cpu.tar.gz` |
+            | Linux x64 CUDA 12.8 | `llama-server-${{ inputs.version }}-linux-x64-cuda-12.tar.gz` |
+            | Linux arm64 CPU | `llama-server-${{ inputs.version }}-linux-arm64-cpu.tar.gz` |
+            | Linux arm64 CUDA 12.8 | `llama-server-${{ inputs.version }}-linux-arm64-cuda-12.tar.gz` |
+
+            ### CUDA SM targets: `${{ inputs.cuda_architectures }}`
+
+            Built with CUDA toolkit 12.8. Requires NVIDIA driver ≥ 570.x on the host.
+          files: artifacts/**/*.tar.gz
+          fail_on_unmatched_files: false
+          generate_release_notes: false
