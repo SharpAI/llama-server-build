@@ -109,6 +109,7 @@ jobs:
             cuda_pkg: 'cuda-toolkit-13-1'
             cuda_home: '/usr/local/cuda-13.1'
 
+
           - name: linux-x64-vulkan
             runner: ubuntu-22.04
             os: linux
@@ -140,6 +141,7 @@ jobs:
             cuda_pkg: 'cuda-toolkit-13-1'
             cuda_home: '/usr/local/cuda-13.1'
 
+
           # ── Windows x64 ──
           - name: windows-x64-cpu
             runner: windows-2022
@@ -152,13 +154,14 @@ jobs:
             runner: windows-2022
             os: windows
             acceleration: cuda
-            cuda_version: '12.4.1'
+            cuda_version: '12.4'
 
           - name: windows-x64-cuda-13
             runner: windows-2022
             os: windows
             acceleration: cuda
-            cuda_version: '13.1.0'
+            cuda_version: '13.1'
+
 
           - name: windows-x64-vulkan
             runner: windows-2022
@@ -167,14 +170,6 @@ jobs:
             cuda_version: ''
             cuda_architectures: ''
 
-          # ── Windows arm64 (cross-compile) ──
-          - name: windows-arm64-cpu
-            runner: windows-2022
-            os: windows
-            acceleration: cpu
-            cross_arch: arm64
-            cuda_version: ''
-            cuda_architectures: ''
 
           # ── macOS ──
           - name: macos-arm64-metal
@@ -185,9 +180,10 @@ jobs:
             cuda_architectures: ''
 
           - name: macos-x64-cpu
-            runner: macos-13
+            runner: macos-14
             os: macos
             acceleration: cpu
+            cross_arch: x86_64
             cuda_version: ''
             cuda_architectures: ''
 
@@ -238,10 +234,9 @@ jobs:
       # ── Windows dependencies ──
       - name: Install CUDA toolkit (Windows)
         if: matrix.os == 'windows' && matrix.acceleration == 'cuda'
-        uses: Jimver/cuda-toolkit@v0.2.19
+        uses: ./.github/actions/windows-setup-cuda
         with:
-          cuda: ${{ matrix.cuda_version }}
-          method: 'network'
+          cuda_version: ${{ matrix.cuda_version }}
 
       - name: Install Vulkan SDK (Windows)
         if: matrix.os == 'windows' && matrix.acceleration == 'vulkan'
@@ -254,6 +249,8 @@ jobs:
       # ── Build (Linux & macOS) ──
       - name: Build llama-server (Unix)
         if: matrix.os != 'windows'
+        env:
+          CROSS_ARCH: ${{ matrix.cross_arch }}
         run: |
           chmod +x scripts/build.sh
           bash scripts/build.sh \
@@ -362,7 +359,6 @@ jobs:
             | x64 CUDA 12.4 | `llama-server-*-windows-x64-cuda-12.zip` |
             | x64 CUDA 13.1 | `llama-server-*-windows-x64-cuda-13.zip` |
             | x64 Vulkan | `llama-server-*-windows-x64-vulkan.zip` |
-            | arm64 CPU | `llama-server-*-windows-arm64-cpu.zip` |
 
             ## Downloads — macOS
 

@@ -43,6 +43,20 @@ case "$OS" in
     *)      echo "❌ Unsupported OS: $OS"; exit 1 ;;
 esac
 
+# Cross-compilation support (e.g. CROSS_ARCH=x86_64 on arm64 macOS)
+CROSS_COMPILE_ARGS=()
+if [ -n "${CROSS_ARCH:-}" ]; then
+    case "$CROSS_ARCH" in
+        x86_64) PLATFORM_ARCH="x64" ;;
+        arm64)  PLATFORM_ARCH="arm64" ;;
+        *)      PLATFORM_ARCH="$CROSS_ARCH" ;;
+    esac
+    if [ "$PLATFORM_OS" = "macos" ]; then
+        CROSS_COMPILE_ARGS+=( -DCMAKE_OSX_ARCHITECTURES="$CROSS_ARCH" )
+    fi
+    echo "🔄 Cross-compiling for $CROSS_ARCH (artifact arch: $PLATFORM_ARCH)"
+fi
+
 if [ "$ACCELERATION" = "cuda" ]; then
     # Determine CUDA label from CUDA_HOME path
     CUDA_LABEL="cuda-12"
@@ -132,7 +146,7 @@ case "$ACCELERATION" in
 esac
 
 echo "🔧 Configuring cmake..."
-cmake "${CMAKE_ARGS[@]}"
+cmake "${CMAKE_ARGS[@]}" "${CROSS_COMPILE_ARGS[@]}"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
