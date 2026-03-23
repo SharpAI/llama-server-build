@@ -232,6 +232,10 @@ jobs:
           echo "${{ matrix.cuda_home }}/bin" >> $GITHUB_PATH
 
       # ── Windows dependencies ──
+      - name: Install Ninja (Windows)
+        if: matrix.os == 'windows'
+        run: choco install ninja -y
+
       - name: Install CUDA toolkit (Windows)
         if: matrix.os == 'windows' && matrix.acceleration == 'cuda'
         uses: ./.github/actions/windows-setup-cuda
@@ -261,41 +265,35 @@ jobs:
       # ── Build (Windows) ──
       - name: Build llama-server (Windows)
         if: matrix.os == 'windows'
+        shell: cmd
+        run: |
+          set VERSION=${{ needs.detect-version.outputs.version }}
+          set ACCELERATION=${{ matrix.acceleration }}
+          set CUDA_ARCHS=${{ matrix.cuda_architectures || needs.detect-version.outputs.cuda_architectures }}
+
+          rem Clone source
+          git clone --depth 1 --branch %VERSION% https://github.com/ggml-org/llama.cpp.git C:\llama-source
+
+          rem Setup MSVC environment
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+
+          rem Configure cmake with Ninja
+          set CMAKE_ARGS=-B C:\llama-build -S C:\llama-source -G "Ninja Multi-Config" -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DGGML_NATIVE=OFF
+
+          if "%ACCELERATION%"=="cuda" set CMAKE_ARGS=%CMAKE_ARGS% -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=%CUDA_ARCHS%
+          if "%ACCELERATION%"=="vulkan" set CMAKE_ARGS=%CMAKE_ARGS% -DGGML_VULKAN=ON
+
+          cmake %CMAKE_ARGS%
+
+          rem Build
+          set /A NINJA_JOBS=%NUMBER_OF_PROCESSORS%-1
+          cmake --build C:\llama-build --config Release -j %NINJA_JOBS%
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows'
         shell: pwsh
         run: |
           $version = "${{ needs.detect-version.outputs.version }}"
-          $acceleration = "${{ matrix.acceleration }}"
-          $cudaArchs = "${{ matrix.cuda_architectures || needs.detect-version.outputs.cuda_architectures }}"
-          $crossArch = "${{ matrix.cross_arch }}"
-
-          # Clone source
-          git clone --depth 1 --branch $version https://github.com/ggml-org/llama.cpp.git C:\llama-source
-
-          # Configure cmake
-          $cmakeArgs = @(
-            "-B", "C:\llama-build",
-            "-S", "C:\llama-source",
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DLLAMA_BUILD_TESTS=OFF",
-            "-DLLAMA_BUILD_EXAMPLES=OFF",
-            "-DLLAMA_BUILD_SERVER=ON"
-          )
-
-          if ($acceleration -eq "cuda") {
-            $cmakeArgs += "-DGGML_CUDA=ON"
-            if ($cudaArchs) { $cmakeArgs += "-DCMAKE_CUDA_ARCHITECTURES=$cudaArchs" }
-          } elseif ($acceleration -eq "vulkan") {
-            $cmakeArgs += "-DGGML_VULKAN=ON"
-          }
-
-          if ($crossArch -eq "arm64") {
-            $cmakeArgs += "-A", "ARM64"
-          }
-
-          cmake @cmakeArgs
-          cmake --build C:\llama-build --config Release --target llama-server -j $env:NUMBER_OF_PROCESSORS
-
-          # Package
           $artifactName = "llama-server-${version}-${{ matrix.name }}"
           $stagingDir = "C:\llama-staging\$artifactName"
           New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
