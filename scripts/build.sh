@@ -146,7 +146,7 @@ case "$ACCELERATION" in
 esac
 
 echo "🔧 Configuring cmake..."
-cmake "${CMAKE_ARGS[@]}" "${CROSS_COMPILE_ARGS[@]}"
+cmake "${CMAKE_ARGS[@]}" ${CROSS_COMPILE_ARGS[@]+"${CROSS_COMPILE_ARGS[@]}"}
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
