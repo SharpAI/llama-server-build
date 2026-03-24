@@ -15,9 +15,9 @@ on:
         default: '75;80;86;89;90;100;120'
         type: string
 
-  # Automatic trigger — check for new releases every 6 hours
+  # Automatic trigger — check for new upstream release every Monday
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 4 * * 1'  # Monday 04:00 UTC (Sunday 9pm PDT)
 
 permissions:
   contents: write
@@ -314,6 +314,42 @@ jobs:
 
           Compress-Archive -Path "$stagingDir" -DestinationPath "dist\${artifactName}.zip"
           Write-Host "✅ Built: dist\${artifactName}.zip"
+
+      # ── Smoke test: verify the binary runs ──
+      - name: Smoke test (Unix)
+        if: matrix.os != 'windows' && matrix.cross_arch == ''
+        run: |
+          BINARY=$(find dist/ -name '*.tar.gz' | head -1)
+          if [ -z "$BINARY" ]; then
+            echo "❌ No tarball found in dist/"
+            exit 1
+          fi
+          echo "📦 Testing: $BINARY"
+          mkdir -p /tmp/smoke-test
+          tar -xzf "$BINARY" -C /tmp/smoke-test
+          SERVER=$(find /tmp/smoke-test -name 'llama-server' -type f | head -1)
+          if [ -z "$SERVER" ]; then
+            echo "❌ llama-server binary not found in archive"
+            exit 1
+          fi
+          chmod +x "$SERVER"
+          echo "🔍 Version:" && "$SERVER" --version
+          echo "✅ Smoke test passed"
+
+      - name: Smoke test (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist\*.zip | Select-Object -First 1
+          if (-not $zip) { Write-Error "No zip found"; exit 1 }
+          Write-Host "📦 Testing: $($zip.Name)"
+          Expand-Archive -Path $zip.FullName -DestinationPath C:\smoke-test -Force
+          $exe = Get-ChildItem C:\smoke-test -Recurse -Filter "llama-server.exe" | Select-Object -First 1
+          if (-not $exe) { Write-Error "llama-server.exe not found"; exit 1 }
+          Write-Host "🔍 Version:" 
+          & $exe.FullName --version
+          if ($LASTEXITCODE -ne 0) { Write-Error "Smoke test failed"; exit 1 }
+          Write-Host "✅ Smoke test passed"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
