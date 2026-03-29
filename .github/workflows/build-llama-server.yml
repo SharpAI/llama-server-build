@@ -121,10 +121,16 @@ jobs:
             cuda_architectures: ''
 
           # ── Linux arm64 ──
+          # All arm64 builds use ggml_native: 'OFF' + -march=armv8-a for a
+          # portable binary that runs on Jetson Orin (A78AE), Raspberry Pi 4
+          # (A72), Pi 5 (A76), Rockchip RK3399/RK3588, and any aarch64 device.
+          # Without this, Graviton runners bake in SVE/i8mm/bf16 instructions
+          # that SIGILL on those targets.
           - name: linux-arm64-cpu
             runner: ubuntu-22.04-arm
             os: linux
             acceleration: cpu
+            ggml_native: 'OFF'
             cuda_version: ''
             cuda_architectures: ''
 
@@ -132,6 +138,7 @@ jobs:
             runner: ubuntu-22.04-arm
             os: linux
             acceleration: cuda
+            ggml_native: 'OFF'
             cuda_version: '12-8'
             cuda_pkg: 'cuda-toolkit-12-8'
             cuda_home: '/usr/local/cuda-12.8'
@@ -141,6 +148,7 @@ jobs:
             runner: ubuntu-22.04-arm
             os: linux
             acceleration: cuda
+            ggml_native: 'OFF'
             cuda_version: '13-1'
             cuda_pkg: 'cuda-toolkit-13-1'
             cuda_home: '/usr/local/cuda-13.1'
@@ -151,6 +159,7 @@ jobs:
             runner: ubuntu-22.04-arm
             os: linux
             acceleration: vulkan
+            ggml_native: 'OFF'
             cuda_version: ''
             cuda_architectures: ''
 
@@ -277,6 +286,9 @@ jobs:
         if: matrix.os != 'windows'
         env:
           CROSS_ARCH: ${{ matrix.cross_arch }}
+          # GGML_NATIVE=OFF forces -march=armv8-a on arm64 runners, producing
+          # a portable binary that won't SIGILL on Jetson/Pi/Rockchip targets.
+          GGML_NATIVE: ${{ matrix.ggml_native || 'ON' }}
         run: |
           chmod +x scripts/build.sh
           bash scripts/build.sh \

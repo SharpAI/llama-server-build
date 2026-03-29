@@ -103,6 +103,23 @@ CMAKE_ARGS=(
     -DLLAMA_BUILD_SERVER=ON
 )
 
+# Generic ARM64 portability: when GGML_NATIVE=OFF, disable host-native CPU
+# detection and force a conservative baseline so the binary runs on
+# Jetson Orin (A78AE), Raspberry Pi 4 (A72), Pi 5 (A76), etc.
+# Without this, builds on Graviton runners bake in SVE/i8mm/bf16 instructions
+# that SIGILL on those targets.
+if [ "${GGML_NATIVE:-ON}" = "OFF" ]; then
+    CMAKE_ARGS+=( -DGGML_NATIVE=OFF )
+    if [ "$PLATFORM_ARCH" = "arm64" ] && [ -z "${CROSS_ARCH:-}" ]; then
+        # armv8-a = ARMv8.0 baseline: mandatory NEON, no dotprod/i8mm/SVE/BF16.
+        # Runs on every 64-bit ARM board from Pi 4 onward.
+        CMAKE_ARGS+=(
+            -DCMAKE_C_FLAGS="-march=armv8-a"
+            -DCMAKE_CXX_FLAGS="-march=armv8-a"
+        )
+    fi
+fi
+
 case "$ACCELERATION" in
     cuda)
         if [ -z "$CUDA_ARCHS" ]; then
