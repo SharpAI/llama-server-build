@@ -218,10 +218,17 @@ jobs:
       - name: Install Vulkan SDK (Linux)
         if: matrix.os == 'linux' && matrix.acceleration == 'vulkan'
         run: |
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+          ARCH=$(dpkg --print-architecture)
+          if [ "$ARCH" = "amd64" ]; then
+            # LunarG full SDK — x86_64 only
+            wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+            sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+            sudo apt-get update
+            sudo apt-get install -y vulkan-sdk
+          else
+            # ARM64: use Ubuntu's built-in Vulkan packages (LunarG SDK is amd64-only)
+            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools
+          fi
 
       - name: Install CUDA toolkit (Linux)
         if: matrix.os == 'linux' && matrix.acceleration == 'cuda'
