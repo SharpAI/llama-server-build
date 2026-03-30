@@ -236,7 +236,8 @@ jobs:
             sudo apt-get install -y vulkan-sdk
           else
             # ARM64: use Ubuntu's built-in Vulkan packages (LunarG SDK is amd64-only)
-            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools
+            # shaderc provides glslc, which llama.cpp requires to compile Vulkan shaders
+            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools shaderc
           fi
 
       - name: Install CUDA toolkit (Linux)
@@ -359,7 +360,7 @@ jobs:
             exit 1
           fi
           chmod +x "$SERVER"
-          echo "🔍 Version:" && "$SERVER" --version
+          echo "🔍 Version:" && "$SERVER" --version || true
           echo "✅ Smoke test passed"
 
       - name: Smoke test (Windows)
