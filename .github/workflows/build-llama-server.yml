@@ -236,7 +236,9 @@ jobs:
             sudo apt-get install -y vulkan-sdk
           else
             # ARM64: use Ubuntu's built-in Vulkan packages (LunarG SDK is amd64-only)
-            # shaderc provides glslc, which llama.cpp requires to compile Vulkan shaders
+            # shaderc (provides glslc) is in the universe repo — enable it first
+            sudo add-apt-repository universe -y
+            sudo apt-get update
             sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools shaderc
           fi
 
