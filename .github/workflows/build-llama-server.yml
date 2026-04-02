@@ -245,8 +245,10 @@ jobs:
             cd /tmp/shaderc
             ./utils/git-sync-deps
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON 
-            cmake --build build --target glslc
-            sudo cp build/glslc/glslc /usr/local/bin/
+            ninja -C build
+            sudo ninja -C build install
+            sudo ldconfig
+            glslc --version
           fi
 
       - name: Install CUDA toolkit (Linux)
