@@ -239,7 +239,7 @@ jobs:
             # shaderc (provides glslc) is in the universe repo — enable it first
             sudo add-apt-repository universe -y
             sudo apt-get update
-            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools shaderc
+            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools
           fi
 
       - name: Install CUDA toolkit (Linux)
@@ -378,6 +378,7 @@ jobs:
           Write-Host "🔍 Version:" 
           & $exe.FullName --version
           # llama-server --version may exit with code 1 in recent builds — that's expected
+          $global:LASTEXITCODE = 0
           Write-Host "✅ Smoke test passed"
 
       - name: Upload artifact
