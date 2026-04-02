@@ -239,7 +239,14 @@ jobs:
             # shaderc (provides glslc) is in the universe repo — enable it first
             sudo add-apt-repository universe -y
             sudo apt-get update
-            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools
+            sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools ninja-build
+            echo "Building glslc from source..."
+            git clone https://github.com/google/shaderc.git /tmp/shaderc
+            cd /tmp/shaderc
+            ./utils/git-sync-deps
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON 
+            cmake --build build --target glslc
+            sudo cp build/glslc/glslc /usr/local/bin/
           fi
 
       - name: Install CUDA toolkit (Linux)
