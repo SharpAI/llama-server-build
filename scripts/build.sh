@@ -103,6 +103,18 @@ CMAKE_ARGS=(
     -DLLAMA_BUILD_SERVER=ON
 )
 
+if [ "$PLATFORM_OS" = "macos" ]; then
+    CMAKE_ARGS+=(
+        -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+        -DCMAKE_INSTALL_RPATH="@loader_path"
+    )
+elif [ "$PLATFORM_OS" = "linux" ]; then
+    CMAKE_ARGS+=(
+        -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+        -DCMAKE_INSTALL_RPATH="\$ORIGIN"
+    )
+fi
+
 # Generic ARM64 portability: when GGML_NATIVE=OFF, disable host-native CPU
 # detection and force a conservative baseline so the binary runs on
 # Jetson Orin (A78AE), Raspberry Pi 4 (A72), Pi 5 (A76), etc.
