@@ -154,15 +154,6 @@ jobs:
             cuda_home: '/usr/local/cuda-13.1'
             cuda_architectures: '75;80;86;89;90;100;120'
 
-
-          - name: linux-arm64-vulkan
-            runner: ubuntu-22.04-arm
-            os: linux
-            acceleration: vulkan
-            ggml_native: 'OFF'
-            cuda_version: ''
-            cuda_architectures: ''
-
           # ── Windows x64 ──
           - name: windows-x64-cpu
             runner: windows-2022
@@ -177,14 +168,6 @@ jobs:
             acceleration: cuda
             cuda_version: '12.4'
             cuda_architectures: '75;80;86;89;90'
-
-          - name: windows-x64-cuda-13
-            runner: windows-2022
-            os: windows
-            acceleration: cuda
-            cuda_version: '13.1'
-            cuda_architectures: '75;80;86;89;90;100;120'
-
 
           - name: windows-x64-vulkan
             runner: windows-2022
@@ -434,7 +417,6 @@ jobs:
             | arm64 CPU | `llama-server-*-linux-arm64-cpu.tar.gz` |
             | arm64 CUDA 12.8 | `llama-server-*-linux-arm64-cuda-12.tar.gz` |
             | arm64 CUDA 13.1 | `llama-server-*-linux-arm64-cuda-13.tar.gz` |
-            | arm64 Vulkan | `llama-server-*-linux-arm64-vulkan.tar.gz` |
 
             ## Downloads — Windows
 
@@ -442,7 +424,6 @@ jobs:
             |---------|------|
             | x64 CPU | `llama-server-*-windows-x64-cpu.zip` |
             | x64 CUDA 12.4 | `llama-server-*-windows-x64-cuda-12.zip` |
-            | x64 CUDA 13.1 | `llama-server-*-windows-x64-cuda-13.zip` |
             | x64 Vulkan | `llama-server-*-windows-x64-vulkan.zip` |
 
             ## Downloads — macOS
