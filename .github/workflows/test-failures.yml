@@ -93,6 +93,9 @@ jobs:
             sudo add-apt-repository universe -y
             sudo apt-get update
             sudo apt-get install -y libvulkan-dev glslang-tools spirv-tools ninja-build
+            echo "Upgrading Vulkan headers from KhronosGroup..."
+            git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/vulkan-headers
+            sudo cp -r /tmp/vulkan-headers/include/vulkan /usr/include/
             echo "Building glslc from source..."
             git clone https://github.com/google/shaderc.git /tmp/shaderc
             cd /tmp/shaderc
