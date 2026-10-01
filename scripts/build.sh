@@ -12,7 +12,7 @@
 #
 # Environment:
 #   CUDA_HOME — path to CUDA toolkit (auto-detected if not set)
-#   BUILD_DIR — cmake build directory (default: /tmp/llama-build)
+#   BUILD_DIR — cmake build directory (default: /tmp/llama-build, as a physical path)
 #   OUTPUT_DIR — where to place the final tarball (default: ./dist)
 
 set -euo pipefail
@@ -21,9 +21,15 @@ VERSION="${1:?Usage: build.sh <version> <acceleration> [cuda_architectures]}"
 ACCELERATION="${2:?Usage: build.sh <version> <acceleration> [cuda_architectures]}"
 CUDA_ARCHS="${3:-}"
 
-BUILD_DIR="${BUILD_DIR:-/tmp/llama-build}"
+# Physical /tmp: on macOS /tmp is a symlink to /private/tmp. llama.cpp's
+# scripts/ui-assets.cmake (v0.4.1+) gzips the UI assets by their REALPATH,
+# and file(ARCHIVE_CREATE) then stores a path relative to the logical
+# /tmp/llama-build/... build dir, which does not resolve from the physical
+# working directory ("Can't lstat ../../../../private/tmp/...").
+TMP_ROOT="$(cd /tmp && pwd -P)"
+BUILD_DIR="${BUILD_DIR:-${TMP_ROOT}/llama-build}"
 OUTPUT_DIR="${OUTPUT_DIR:-./dist}"
-SOURCE_DIR="/tmp/llama-source"
+SOURCE_DIR="${TMP_ROOT}/llama-source"
 
 # ── Derived values ────────────────────────────────────────────────────────────
 
