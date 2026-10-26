@@ -7,11 +7,11 @@
 # Set EXTRA_ARGS to add server flags (e.g. "-ngl 0").
 set -uo pipefail
 DIR="${1:?dir}"; MODEL="${2:?model}"; shift 2
-PREFIX=("$@")
+PREFIX=("$@")   # may be empty (bash 3.2 + set -u: expand with ${PREFIX[@]+...})
 PORT=18080
 LOG="$(mktemp)"
 # shellcheck disable=SC2086
-"${PREFIX[@]}" "$DIR/llama-server" --model "$MODEL" --host 127.0.0.1 --port $PORT -c 256 ${EXTRA_ARGS:-} >"$LOG" 2>&1 &
+${PREFIX[@]+"${PREFIX[@]}"} "$DIR/llama-server" --model "$MODEL" --host 127.0.0.1 --port $PORT -c 256 ${EXTRA_ARGS:-} >"$LOG" 2>&1 &
 PID=$!
 ok=0
 for i in $(seq 1 60); do
