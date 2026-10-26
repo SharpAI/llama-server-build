@@ -14,12 +14,25 @@
 #   CUDA_HOME — path to CUDA toolkit (auto-detected if not set)
 #   BUILD_DIR — cmake build directory (default: /tmp/llama-build, as a physical path)
 #   OUTPUT_DIR — where to place the final tarball (default: ./dist)
+#   SSL_VARIANT — "default" (unset: whatever cmake finds, historical behaviour),
+#                 "noopenssl" (LLAMA_OPENSSL=OFF, no HTTPS in llama-server),
+#                 "staticssl" (OpenSSL linked statically from OPENSSL_ROOT_DIR,
+#                 which must hold lib/libssl.a + lib/libcrypto.a; build it with
+#                 scripts/build-static-openssl.sh). Non-default variants add
+#                 "-<variant>" to the tarball file name only; the directory
+#                 layout inside the archive is unchanged.
 
 set -euo pipefail
 
 VERSION="${1:?Usage: build.sh <version> <acceleration> [cuda_architectures]}"
 ACCELERATION="${2:?Usage: build.sh <version> <acceleration> [cuda_architectures]}"
 CUDA_ARCHS="${3:-}"
+
+SSL_VARIANT="${SSL_VARIANT:-default}"
+case "$SSL_VARIANT" in
+    default|noopenssl|staticssl) ;;
+    *) echo "❌ Unknown SSL_VARIANT: $SSL_VARIANT"; exit 1 ;;
+esac
 
 # Physical /tmp: on macOS /tmp is a symlink to /private/tmp. llama.cpp's
 # scripts/ui-assets.cmake (v0.4.1+) gzips the UI assets by their REALPATH,
@@ -59,7 +72,10 @@ if [ -n "${CROSS_ARCH:-}" ]; then
     esac
     CROSS_COMPILE_ARGS+=( -DGGML_NATIVE=OFF )
     CROSS_COMPILE_ARGS+=( -DLLAMA_BUILD_BORINGSSL=OFF )
-    CROSS_COMPILE_ARGS+=( -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON )
+    if [ "$SSL_VARIANT" != "staticssl" ]; then
+        # Host (arm64) OpenSSL cannot be linked into an x86_64 binary.
+        CROSS_COMPILE_ARGS+=( -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON )
+    fi
     if [ "$PLATFORM_OS" = "macos" ]; then
         CROSS_COMPILE_ARGS+=( -DCMAKE_OSX_ARCHITECTURES="$CROSS_ARCH" )
     fi
@@ -79,6 +95,11 @@ if [ "$ACCELERATION" = "cuda" ]; then
 else
     ARTIFACT_NAME="llama-server-${VERSION}-${PLATFORM_OS}-${PLATFORM_ARCH}-${ACCELERATION}"
 fi
+# Archive file name only; the top-level directory inside stays ARTIFACT_NAME.
+ARCHIVE_NAME="$ARTIFACT_NAME"
+if [ "$SSL_VARIANT" != "default" ]; then
+    ARCHIVE_NAME="${ARTIFACT_NAME}-${SSL_VARIANT}"
+fi
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  llama-server builder                                       ║"
@@ -88,7 +109,8 @@ echo "║  OS:            ${PLATFORM_OS}"
 echo "║  Acceleration:  ${ACCELERATION}"
 echo "║  Architecture:  ${ARCH} (${PLATFORM_ARCH})"
 echo "║  CUDA archs:    ${CUDA_ARCHS:-n/a}"
-echo "║  Artifact:      ${ARTIFACT_NAME}.tar.gz"
+echo "║  SSL variant:   ${SSL_VARIANT}"
+echo "║  Artifact:      ${ARCHIVE_NAME}.tar.gz"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 # ── Clone source ──────────────────────────────────────────────────────────────
@@ -137,6 +159,30 @@ if [ "${GGML_NATIVE:-ON}" = "OFF" ]; then
         )
     fi
 fi
+
+# OpenSSL handling (llama.cpp b8672: option LLAMA_OPENSSL in the top-level
+# CMakeLists.txt, consumed by vendor/cpp-httplib/CMakeLists.txt).
+case "$SSL_VARIANT" in
+    noopenssl)
+        CMAKE_ARGS+=(
+            -DLLAMA_OPENSSL=OFF
+            -DLLAMA_BUILD_BORINGSSL=OFF
+            -DLLAMA_BUILD_LIBRESSL=OFF
+            -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+        )
+        ;;
+    staticssl)
+        : "${OPENSSL_ROOT_DIR:?SSL_VARIANT=staticssl needs OPENSSL_ROOT_DIR (lib/libssl.a, lib/libcrypto.a)}"
+        for f in "$OPENSSL_ROOT_DIR/lib/libssl.a" "$OPENSSL_ROOT_DIR/lib/libcrypto.a"; do
+            [ -f "$f" ] || { echo "❌ missing $f"; exit 1; }
+        done
+        CMAKE_ARGS+=(
+            -DLLAMA_OPENSSL=ON
+            -DOPENSSL_USE_STATIC_LIBS=ON
+            -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR"
+        )
+        ;;
+esac
 
 case "$ACCELERATION" in
     cuda)
@@ -218,7 +264,7 @@ done
 
 # Create tarball
 mkdir -p "$OUTPUT_DIR"
-TARBALL="${OUTPUT_DIR}/${ARTIFACT_NAME}.tar.gz"
+TARBALL="${OUTPUT_DIR}/${ARCHIVE_NAME}.tar.gz"
 tar -czf "$TARBALL" -C "/tmp/llama-staging" "${ARTIFACT_NAME}"
 
 SIZE_MB=$(du -m "$TARBALL" | cut -f1)
