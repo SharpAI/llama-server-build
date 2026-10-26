@@ -15,6 +15,12 @@ on:
         default: '75;80;86;89;90;100;120'
         type: string
 
+      macos_ssl_variants:
+        description: 'EXPERIMENT: build ONLY the macOS no-OpenSSL / static-OpenSSL variants as workflow artifacts (no Linux/Windows, no release upload)'
+        required: false
+        default: false
+        type: boolean
+
   # Automatic trigger — check for new upstream release every Monday
   schedule:
     - cron: '0 4 * * 1'  # Monday 04:00 UTC (Sunday 9pm PDT)
@@ -80,7 +86,7 @@ jobs:
   # ── Step 2: Build all variants ───────────────────────────────────────────────
   build:
     needs: detect-version
-    if: needs.detect-version.outputs.should_build == 'true'
+    if: needs.detect-version.outputs.should_build == 'true' && !inputs.macos_ssl_variants
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -385,9 +391,116 @@ jobs:
             dist/*.zip
           retention-days: 7
 
+
+  # ── macOS SSL variants (experiment; artifacts only, never released) ──────────
+  # A = OpenSSL off (LLAMA_OPENSSL=OFF), B = OpenSSL linked statically.
+  macos-ssl-variants:
+    needs: detect-version
+    if: inputs.macos_ssl_variants && needs.detect-version.outputs.should_build == 'true'
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64-metal, acceleration: metal, cross_arch: '',       arch: arm64,  variant: noopenssl, suffix: noopenssl }
+          - { name: macos-arm64-metal, acceleration: metal, cross_arch: '',       arch: arm64,  variant: staticssl, suffix: staticssl }
+          - { name: macos-x64-cpu,     acceleration: cpu,   cross_arch: x86_64,   arch: x86_64, variant: noopenssl, suffix: noopenssl }
+          - { name: macos-x64-cpu,     acceleration: cpu,   cross_arch: x86_64,   arch: x86_64, variant: staticssl, suffix: staticssl }
+    name: ${{ matrix.name }}-${{ matrix.variant }}
+    runs-on: macos-14
+    env:
+      VERSION: ${{ needs.detect-version.outputs.version }}
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+
+      - name: Build static OpenSSL (variant B)
+        if: matrix.variant == 'staticssl'
+        run: scripts/build-static-openssl.sh "${{ matrix.arch }}" "$RUNNER_TEMP/openssl-static"
+
+      - name: Build llama-server
+        env:
+          CROSS_ARCH: ${{ matrix.cross_arch }}
+          SSL_VARIANT: ${{ matrix.variant }}
+          OPENSSL_ROOT_DIR: ${{ runner.temp }}/openssl-static
+        run: bash scripts/build.sh "$VERSION" "${{ matrix.acceleration }}"
+
+      - name: Extract built archive
+        run: |
+          set -e
+          ls -l dist
+          TB=$(ls dist/*-${{ matrix.suffix }}.tar.gz)
+          mkdir -p "$RUNNER_TEMP/extract"
+          tar -xzf "$TB" -C "$RUNNER_TEMP/extract"
+          ls -l "$RUNNER_TEMP/extract"/*/
+          echo "BUNDLE=$(ls -d "$RUNNER_TEMP"/extract/*/)" >> "$GITHUB_ENV"
+
+      - name: "Gate (a): otool -L linkage"
+        run: scripts/check-macos-linkage.sh "$BUNDLE"
+
+      - name: "Gate (c): archive size and SHA-256"
+        run: |
+          for f in dist/*.tar.gz; do
+            echo "ARCHIVE $(basename "$f") size_bytes=$(stat -f%z "$f") sha256=$(shasum -a 256 "$f" | awk '{print $1}')"
+          done | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Bundle contents:"; ls -l "$BUNDLE"
+
+      - name: Hide OpenSSL (brew)
+        run: |
+          brew list --versions openssl@3 || true
+          brew uninstall --ignore-dependencies openssl@3 || true
+          sudo mv /opt/homebrew/opt/openssl@3 /opt/homebrew/opt/openssl@3.hidden 2>/dev/null || true
+          sudo mv /opt/homebrew/Cellar/openssl@3 /opt/homebrew/Cellar/openssl@3.hidden 2>/dev/null || true
+          test ! -e /opt/homebrew/opt/openssl@3 && test ! -e /opt/homebrew/Cellar/openssl@3 && echo "OpenSSL hidden"
+          find /opt/homebrew /usr/local -name 'libssl*.dylib' -o -name 'libcrypto*.dylib' 2>/dev/null | head
+
+      - name: Download tiny test model
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/tiny.gguf" \
+            https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf
+          ls -l "$RUNNER_TEMP/tiny.gguf"
+
+      - name: "Gate (b): runtime smoke with OpenSSL hidden"
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            # x86_64 binary on an arm64 runner: only Rosetta can run it. Rosetta has
+            # no AVX, so the GGML_NATIVE=OFF x86 build may die with SIGILL while
+            # loading the model. That is an emulation limit, not a linkage problem,
+            # so in that case fall back to a dyld-resolution check with OpenSSL hidden.
+            arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license
+            if scripts/runtime-smoke.sh "$BUNDLE" "$RUNNER_TEMP/tiny.gguf" arch -x86_64; then
+              exit 0
+            fi
+            echo "::warning::x86_64 full server run failed under Rosetta (see log above); falling back to dyld-only check"
+            set +e
+            arch -x86_64 "$BUNDLE/llama-server" --version >"$RUNNER_TEMP/ver.txt" 2>&1
+            rc=$?
+            set -e
+            cat "$RUNNER_TEMP/ver.txt" | head -20
+            echo "exit code: $rc"
+            if grep -qiE "Library not loaded|dyld\[|image not found|Symbol not found" "$RUNNER_TEMP/ver.txt"; then
+              echo "❌ dyld could not resolve a dependency with OpenSSL hidden"; exit 1
+            fi
+            echo "dyld resolved every dependency with OpenSSL hidden (exit $rc; 132 = SIGILL from Rosetta lacking AVX, an emulation limit). This is NOT a runtime test."
+          else
+            scripts/runtime-smoke.sh "$BUNDLE" "$RUNNER_TEMP/tiny.gguf" || {
+              echo "Retrying with -ngl 0 to separate Metal-in-VM problems from linkage problems"
+              EXTRA_ARGS="-ngl 0" scripts/runtime-smoke.sh "$BUNDLE" "$RUNNER_TEMP/tiny.gguf"
+              exit 1
+            }
+          fi
+
+      - name: Upload artifact (workflow artifact only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-server-${{ needs.detect-version.outputs.version }}-${{ matrix.name }}-${{ matrix.suffix }}
+          path: dist/*-${{ matrix.suffix }}.tar.gz
+          retention-days: 7
+
   # ── Step 3: Publish release ──────────────────────────────────────────────────
   release:
     needs: [detect-version, build]
+    if: ${{ !inputs.macos_ssl_variants }}
     runs-on: ubuntu-22.04
     steps:
       - name: Download all artifacts
