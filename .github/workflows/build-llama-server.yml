@@ -471,9 +471,17 @@ jobs:
             if scripts/runtime-smoke.sh "$BUNDLE" "$RUNNER_TEMP/tiny.gguf" arch -x86_64; then
               exit 0
             fi
-            echo "::warning::x86_64 full server run failed under Rosetta (see log above); falling back to dyld check"
-            arch -x86_64 "$BUNDLE/llama-server" --version 2>&1 | tee "$RUNNER_TEMP/ver.txt"
-            grep -q "version" "$RUNNER_TEMP/ver.txt" && echo "✅ x86_64 binary resolves all libraries with OpenSSL hidden (dyld check only; NOT a runtime test)"
+            echo "::warning::x86_64 full server run failed under Rosetta (see log above); falling back to dyld-only check"
+            set +e
+            arch -x86_64 "$BUNDLE/llama-server" --version >"$RUNNER_TEMP/ver.txt" 2>&1
+            rc=$?
+            set -e
+            cat "$RUNNER_TEMP/ver.txt" | head -20
+            echo "exit code: $rc"
+            if grep -qiE "Library not loaded|dyld\[|image not found|Symbol not found" "$RUNNER_TEMP/ver.txt"; then
+              echo "❌ dyld could not resolve a dependency with OpenSSL hidden"; exit 1
+            fi
+            echo "dyld resolved every dependency with OpenSSL hidden (exit $rc; 132 = SIGILL from Rosetta lacking AVX, an emulation limit). This is NOT a runtime test."
           else
             scripts/runtime-smoke.sh "$BUNDLE" "$RUNNER_TEMP/tiny.gguf" || {
               echo "Retrying with -ngl 0 to separate Metal-in-VM problems from linkage problems"
